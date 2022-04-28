@@ -1,5 +1,5 @@
 from tokenize import group
-import requests, json, re, time, sys, xmltodict
+import requests, json, re, time, sys, xmltodict, csv
 from collections import defaultdict
 from jsonpath_ng import jsonpath, parse
 from requests.auth import HTTPBasicAuth
@@ -8,14 +8,13 @@ from requests.auth import HTTPBasicAuth
 # Step Input Parameters
 qualys_username = "{{ $.set_variable.qualys.user }}"
 qualys_password = "{{ $.set_variable.qualys.pass }}"
-report_id = ""
+report_id = "6877294"
 report_name="IL vulnerability results"
 debug = True
 export_severity="critical"
 export_state="open"
 
 
-found = False
 final_data=defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list))))))
 
 def debug_msg(debug_msg):
@@ -24,18 +23,21 @@ def debug_msg(debug_msg):
 
 def list_reports(username, password):
     url = f"https://qualysapi.qg3.apps.qualys.com/api/2.0/fo/report/?action=list"
-    #print("Listing Reports, url)
+    debug_msg("Listing Reports "+ url)
     out = requests.get(url, headers={"X-Requested-With": "Torq"}, auth=HTTPBasicAuth(username, password))
     xmlobj = xmltodict.parse(out.content) #Convert XML response to JSON
-    return json.dumps(xmlobj)
+    return json.loads(json.dumps(xmlobj)) 
 
-
-def export_vulnerabilities(export_severity,export_state):
-    url = f"https://cloud.tenable.com/vulns/export"
-    #print("Exporting Vulnerabilities", url)
-    payload = {"filters": {"severity": [export_severity],"state": [export_state]},"num_assets": 50}
-    out = requests.post(url, headers={"Content-Type":"application/json; charset=utf-8","X-ApiKeys": f"accessKey={access_key}; secretKey={secretKey}"},json=json.dumps(payload))
-    return json.loads(out.content)
+def fetch_report(username, password, id):
+    url = f"https://qualysapi.qg3.apps.qualys.com/api/2.0/fo/report/?action=fetch&id="+id
+    debug_msg("Fetch Report "+ url)
+    out = requests.get(url, headers={"X-Requested-With": "Torq"}, auth=HTTPBasicAuth(username, password))
+    #f = open("report.csv", mode="wt")
+    #f.write(str(out.content))
+    #f.flush()
+    #f.close()
+    #return json.dumps(list(csv.reader(open('report.csv'))))
+    return json.dumps(list(csv.reader(str(out.content))))
 
 def check_export(export_uuid):
     url = f"https://cloud.tenable.com/vulns/export/{export_uuid}/status"
@@ -60,6 +62,8 @@ def get_custom_entry(entry,mapping):
     return current_entry
 
 
+print(fetch_report(qualys_username, qualys_password, report_id))
+
 #------------------------------
 
 # Check if report ID Provided -> If not, get report ID from Qualys before continuing
@@ -69,7 +73,7 @@ if not report_id:
     for x in data.get('REPORT_LIST_OUTPUT'):
         if x['TITLE'] == report_name:
              scan_id=(x['ID'])
-             debug_msg("scan uuid: "+str(scan_uuid))
+             debug_msg("report id: "+str(report_id))
              break
 
     if report_id == "":
@@ -86,8 +90,8 @@ if not report_id:
 
 
 # Export vulnerabilities
-data = export_vulnerabilities(export_severity,export_state)
-export_uuid = data.get("export_uuid")
+#data = export_vulnerabilities(export_severity,export_state)
+
 
 #Wait for export to complete before continuing
 counter = 0
