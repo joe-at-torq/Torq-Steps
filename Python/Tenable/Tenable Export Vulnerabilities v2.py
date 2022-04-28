@@ -54,28 +54,32 @@ solution_groups=[
 found = False
 final_data=defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list))))))
 
+def debug_msg(debug_msg):
+    if debug == True:
+        print(debug_msg)
+
 def list_scans():
     url = f"https://cloud.tenable.com/scans/?"
-    #print("Listing Scans", url)
+    debug_msg("Listing Scans "+ url)
     out = requests.get(url, headers={"X-ApiKeys": f"accessKey={access_key}; secretKey={secretKey}"})
     return json.loads(out.content)
 
 def export_vulnerabilities(export_severity,export_state):
     url = f"https://cloud.tenable.com/vulns/export"
-    #print("Exporting Vulnerabilities", url)
+    debug_msg("Exporting Vulnerabilities "+ url)
     payload = {"filters": {"severity": [export_severity],"state": [export_state]},"num_assets": 50}
     out = requests.post(url, headers={"Content-Type":"application/json; charset=utf-8","X-ApiKeys": f"accessKey={access_key}; secretKey={secretKey}"},json=json.dumps(payload))
     return json.loads(out.content)
 
 def check_export(export_uuid):
     url = f"https://cloud.tenable.com/vulns/export/{export_uuid}/status"
-    #print("Checking Export Status", url)
+    debug_msg("Checking Export Status " +url)
     out = requests.get(url, headers={"X-ApiKeys": f"accessKey={access_key}; secretKey={secretKey}"})
     return json.loads(out.content)
 
 def download_chunk(chunk_number):
     url = f"https://cloud.tenable.com/vulns/export/{export_uuid}/chunks/{chunk_number}"
-    #print("Getting", url)
+    debug_msg("Getting "+ url)
     out = requests.get(url, headers={"X-ApiKeys": f"accessKey={access_key}; secretKey={secretKey}"})
     return json.loads(out.content)
 
@@ -91,6 +95,7 @@ def get_custom_entry(entry,mapping):
 
 
 # Step Input Parameters
+debug = True
 access_key = "{{ $.integrations.tenableio.tenable_access_key }}"
 secretKey = "{{ $.integrations.tenableio.tenable_secret_key }}"
 scan_uuid = ""
@@ -106,6 +111,7 @@ if not scan_uuid:
     for x in data.get('scans'):
         if x['name'] == scan_name:
              scan_uuid=(x['uuid'])
+             debug_msg("scan uuid: "+str(scan_uuid))
              break
 
     if scan_uuid == "":
@@ -120,12 +126,13 @@ export_uuid = data.get("export_uuid")
 
 #Wait for export to complete before continuing
 counter = 0
-while counter < 25:
+while counter < 240:
     data = check_export(export_uuid)
     export_status = data.get('status')
     
     if export_status == "FINISHED":
         chunks = data.get('chunks_available')
+        debug_msg("scan chunks: "+str(chunks))
         break
     else:
         time.sleep( 5 )
@@ -137,16 +144,23 @@ else:
     sys.exit(1)
 
 # Process Data Chunks From Tenable
+entries_matched = 0
+entries_unmatched = 0
+entries_total = 0
+
 for chunk in chunks:
    data = download_chunk(chunk)
    for entry in data:
+       entries_total = entries_total + 1
        if not entry.get("scan") or entry.get("scan").get("uuid") != scan_uuid:
+           entries_unmatched = entries_unmatched + 1
            continue
 
        solution = entry.get("plugin", {}).get("solution")
        cve = entry.get("plugin", {}).get("cve")
        plugin_id = entry.get("plugin", {}).get("id")
        plugin_name = entry.get("plugin", {}).get("name")
+       entries_matched = entries_matched + 1
 
        found = False
        if group_vulnerabilities == True:
@@ -180,4 +194,13 @@ for chunk in chunks:
 
        
 #print("<-- END -->" + json.dumps(final_data))
+debug_msg("Total entries: "+str(entries_total))
+debug_msg("UUID matched entries: "+str(entries_matched))
+debug_msg("UUID unmatched entries: "+str(entries_unmatched))
+
+#Final Step Output
+
 print(json.dumps(final_data))
+
+#print('{"step_status": {"code": 1,"message": "Matched '+str(entries_matched)+" of "+str(entries_total)+" vulnerabilities to scan "+str(scan_uuid)+'", "verbose": ""}}')
+sys.exit(0)
