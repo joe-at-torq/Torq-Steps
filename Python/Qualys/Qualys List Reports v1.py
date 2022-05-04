@@ -6,16 +6,10 @@ from requests.auth import HTTPBasicAuth
 
 
 # Step Input Parameters
-qualys_username = "{{ $.set_variable.qualys.user }}"
-qualys_password = "{{ $.set_variable.qualys.pass }}"
-report_id = "6877294"
-report_name="IL vulnerability results"
-debug = True
-export_severity="critical"
-export_state="open"
-
-
-final_data=defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list))))))
+qualys_username = "{{ $.integrations.qualys.qualys_username }}"
+qualys_password = "{{ $.integrations.qualys.qualys_password }}"
+report_id = "{{ $.filter_array.result.0.ID }}"
+debug = False
 
 def debug_msg(debug_msg):
     if debug == True:
@@ -32,127 +26,22 @@ def fetch_report(username, password, id):
     url = f"https://qualysapi.qg3.apps.qualys.com/api/2.0/fo/report/?action=fetch&id="+id
     debug_msg("Fetch Report "+ url)
     out = requests.get(url, headers={"X-Requested-With": "Torq"}, auth=HTTPBasicAuth(username, password))
-    #f = open("report.csv", mode="wt")
-    #f.write(str(out.content))
-    #f.flush()
-    #f.close()
-    #return json.dumps(list(csv.reader(open('report.csv'))))
-    return json.dumps(list(csv.reader(str(out.content))))
+    filename="report.csv"
+    file_open=open(filename,'w')
+    file_open.write(str(out.text))
+    file_open.flush()
+    file_open.close()
 
-def check_export(export_uuid):
-    url = f"https://cloud.tenable.com/vulns/export/{export_uuid}/status"
-    #print("Checking Export Status", url)
-    out = requests.get(url, headers={"X-ApiKeys": f"accessKey={access_key}; secretKey={secretKey}"})
-    return json.loads(out.content)
+fetch_report(qualys_username, qualys_password, report_id)
 
-def download_chunk(chunk_number):
-    url = f"https://cloud.tenable.com/vulns/export/{export_uuid}/chunks/{chunk_number}"
-    #print("Getting", url)
-    out = requests.get(url, headers={"X-ApiKeys": f"accessKey={access_key}; secretKey={secretKey}"})
-    return json.loads(out.content)
-
-def get_custom_entry(entry,mapping):
-    current_entry = {}
-    for key, jsonpath in mapping.items():
-        val = ""
-        match = jsonpath.find(entry)
-        if match:
-            val = match[0].value
-        current_entry[key] = val
-    return current_entry
-
-
-print(fetch_report(qualys_username, qualys_password, report_id))
-
-#------------------------------
-
-# Check if report ID Provided -> If not, get report ID from Qualys before continuing
-if not report_id:
-    #List Tenable Scans
-    data = list_reports(qualys_username,qualys_password)   
-    for x in data.get('REPORT_LIST_OUTPUT'):
-        if x['TITLE'] == report_name:
-             scan_id=(x['ID'])
-             debug_msg("report id: "+str(report_id))
-             break
-
-    if report_id == "":
-        #Display error in Torq UI
-        print('{"step_status": {"code": 9,"message": "Unable to find scan id.", "verbose": "Unable to find the Qualys scan. Please check the report name provided OR provide the id of the scan."}}')
-        sys.exit(1)
-
-
-
-
-
-
-
-
-
-# Export vulnerabilities
-#data = export_vulnerabilities(export_severity,export_state)
-
-
-#Wait for export to complete before continuing
-counter = 0
-while counter < 25:
-    data = check_export(export_uuid)
-    export_status = data.get('status')
-    
-    if export_status == "FINISHED":
-        chunks = data.get('chunks_available')
-        break
-    else:
-        time.sleep( 5 )
-        counter = counter + 1
-
-else:
-    #Display error in Torq UI
-    print('{"step_status": {"code": 9,"message": "Timeout exceeded waiting for exported scan.", "verbose": "The vulnerability export exceeded the 120 second timer."}}')
-    sys.exit(1)
-
-# Process Data Chunks From Tenable
-for chunk in chunks:
-   data = download_chunk(chunk)
-   for entry in data:
-       if not entry.get("scan") or entry.get("scan").get("uuid") != scan_uuid:
-           continue
-
-       solution = entry.get("plugin", {}).get("solution")
-       cve = entry.get("plugin", {}).get("cve")
-       plugin_id = entry.get("plugin", {}).get("id")
-       plugin_name = entry.get("plugin", {}).get("name")
-
-       found = False
-       #Grouped Items
-       for group in solution_groups:
-           
-           if re.search(group["match"],solution,re.IGNORECASE):
-               #soultion group substring found in solution value - Group all hosts to the same solution
-               if (isinstance(final_data['grouped'][entry['severity']][group["label"]]['hosts'][entry['asset']['hostname']],dict)):
-                   final_data['grouped'][entry['severity']][group["label"]]['hosts'][entry['asset']['hostname']]=[]
-               final_data['grouped'][entry['severity']][group["label"]]['general_recommendation']=group['general_recommendation']
-               final_data['grouped'][entry['severity']][group["label"]][solution]['cve']=cve
-               final_data['grouped'][entry['severity']][group["label"]][solution]['severity']=entry['severity']
-               final_data['grouped'][entry['severity']][group["label"]][solution]['plugin_name']=plugin_name
-               final_data['grouped'][entry['severity']][group["label"]][solution]['plugin_id']=plugin_id
-               final_data['grouped'][entry['severity']][group["label"]][solution]['output']=entry["output"]
-               final_data['grouped'][entry['severity']][group["label"]][solution]['cvss']=get_custom_entry(entry,CVSS_JSON_MAPPING)
-               final_data['grouped'][entry['severity']][group["label"]][solution]['cvss3']=get_custom_entry(entry,CVSS3_JSON_MAPPING)
-               final_data['grouped'][entry['severity']][group["label"]]['hosts'][entry['asset']['hostname']].append(get_custom_entry(entry,FINAL_JSON_MAPPING))
-               found = True
-
-       #Ungrouped Items
-       if found == False:
-          test="1"
-          if (isinstance(final_data['ungrouped'][entry['severity']][solution],dict)):
-               final_data['ungrouped'][entry['severity']][solution]['hosts']=[]
-          final_data['ungrouped'][entry['severity']][solution]['hosts'].append(get_custom_entry(entry,FINAL_JSON_MAPPING))
-          final_data['ungrouped'][entry['severity']][solution]['cve']=cve
-          final_data['ungrouped'][entry['severity']][solution]['severity']=entry['severity']
-          final_data['ungrouped'][entry['severity']][solution]['plugin_name']=plugin_name
-          final_data['ungrouped'][entry['severity']][solution]['plugin_id']=plugin_id
-
-       
-#print("<-- END -->" + json.dumps(final_data))
-print(json.dumps(final_data))
+#Convert report from CSV to JSON
+filename="report.csv"
+jsonArray=[]
+count=0
+with open(filename, encoding='utf-8') as csvf:
+        ex_header = csvf.readlines()[4:] #Location of the CSV header
+        csvReader = csv.DictReader(ex_header)
+        for rows in csvReader:
+            jsonArray.append(rows) 
+        
+print("{\"qualysreport\":"+json.dumps(jsonArray)+"}")
