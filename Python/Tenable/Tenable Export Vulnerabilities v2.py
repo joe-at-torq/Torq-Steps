@@ -115,13 +115,13 @@ def get_custom_entry(entry,mapping):
 
 
 # Step Input Parameters
-debug = True
-super_debug = True #Brace yourself
+debug = False
+super_debug = False #Brace yourself
 access_key = "{{ $.integrations.tenableio.tenable_access_key }}"
 secretKey = "{{ $.integrations.tenableio.tenable_secret_key }}"
 scan_uuid = ""
 scan_name= "{{ $.scan_names.scan_name }}"
-export_severity="high"
+export_severity="critical"
 export_state="open"
 group_vulnerabilities=True
 
