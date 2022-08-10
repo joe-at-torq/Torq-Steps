@@ -3,6 +3,8 @@ import requests, json, re, time, sys
 from collections import defaultdict
 from jsonpath_ng import jsonpath, parse
 
+#Version 2.2.3
+
 FINAL_JSON_MAPPING = {
     "hostname": parse("$.asset.hostname"),
     "first_found": parse("$.first_found"),
@@ -58,17 +60,35 @@ def debug_msg(debug_msg):
     if debug == True:
         print(debug_msg)
 
+def super_debug_msg(debug_msg):
+    if super_debug == True:
+        print(debug_msg)
+
 def list_scans():
     url = f"https://cloud.tenable.com/scans/?"
     debug_msg("Listing Scans "+ url)
     out = requests.get(url, headers={"X-ApiKeys": f"accessKey={access_key}; secretKey={secretKey}"})
+    
+    if int(out.status_code) > 299:
+        print("Status: "+str(out.status_code)+", Error: "+str(out.content))
+        sys.exit(9) #Exit with error
+    else:
+        super_debug_msg("[Listing Scans Output]")
+        super_debug_msg("   - "+str(out.content))
+    
     return json.loads(out.content)
 
 def export_vulnerabilities(export_severity,export_state):
     url = f"https://cloud.tenable.com/vulns/export"
     debug_msg("Exporting Vulnerabilities "+ url)
-    payload = {"filters": {"severity": [export_severity],"state": [export_state]},"num_assets": 50}
+    if export_state == "":
+        payload = {"filters": {"severity": [export_severity]},"num_assets": 50}
+    else:
+        payload = {"filters": {"severity": [export_severity],"state": [export_state]},"num_assets": 50}
+
     out = requests.post(url, headers={"Content-Type":"application/json; charset=utf-8","X-ApiKeys": f"accessKey={access_key}; secretKey={secretKey}"},json=json.dumps(payload))
+    super_debug_msg("[Exporting Scan: Payload = "+str(payload)+"]")
+    super_debug_msg("   - "+str(out.content))
     return json.loads(out.content)
 
 def check_export(export_uuid):
@@ -96,13 +116,14 @@ def get_custom_entry(entry,mapping):
 
 # Step Input Parameters
 debug = True
+super_debug = True #Brace yourself
 access_key = "{{ $.integrations.tenableio.tenable_access_key }}"
 secretKey = "{{ $.integrations.tenableio.tenable_secret_key }}"
 scan_uuid = ""
-scan_name = "{{ $.scan_name.scan }}"
-export_severity = "critical"
-export_state = "open"
-group_vulnerabilities = True
+scan_name= "{{ $.scan_names.scan_name }}"
+export_severity="high"
+export_state="open"
+group_vulnerabilities=True
 
 # Check if Scan UUID Provided -> If not, get Scan UUID from Tenable before continuing
 if not scan_uuid:
@@ -152,7 +173,11 @@ for chunk in chunks:
    data = download_chunk(chunk)
    for entry in data:
        entries_total = entries_total + 1
+
+       super_debug_msg("[Chunk #"+str(chunk)+" - Entry #"+str(entries_total)+"]")
+       super_debug_msg("   - Entry Data: "+str(entry))
        if not entry.get("scan") or entry.get("scan").get("uuid") != scan_uuid:
+           
            entries_unmatched = entries_unmatched + 1
            continue
 
@@ -161,6 +186,10 @@ for chunk in chunks:
        plugin_id = entry.get("plugin", {}).get("id")
        plugin_name = entry.get("plugin", {}).get("name")
        entries_matched = entries_matched + 1
+       
+       super_debug_msg("   - "+solution)
+       super_debug_msg("   - "+cve)
+
 
        found = False
        if group_vulnerabilities == True:
